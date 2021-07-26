@@ -16,10 +16,11 @@ installed using Composer:
  composer require wieni/wmcontroller_redis
 ```
 
-To enable this cache storage, change the `wmcontroller.cache.storage` container parameter:
+To enable this cache storage, change the `wmcontroller.cache.storage` and `wmcontroller.cache.invalidator` container parameter:
 ```yaml
 parameters:
     wmcontroller.cache.storage: wmcontroller.cache.storage.redis
+    wmcontroller.cache.invalidator: wmcontroller.redis.checksum
 
     wmcontroller.cache.redis.prefix: 'wmcontroller:'
 ```

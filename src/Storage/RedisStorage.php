@@ -2,6 +2,7 @@
 
 namespace Drupal\wmcontroller_redis\Storage;
 
+use Drupal\Core\Cache\CacheTagsChecksumInterface;
 use Drupal\wmcontroller\Entity\Cache;
 use Drupal\wmcontroller\Exception\NoSuchCacheEntryException;
 use Drupal\wmcontroller\Service\Cache\CacheSerializerInterface;
@@ -15,11 +16,14 @@ class RedisStorage implements StorageInterface
     protected $redis;
     /** @var \Drupal\wmcontroller\Service\Cache\CacheSerializerInterface */
     protected $serializer;
+    /** @var \Drupal\Core\Cache\CacheTagsChecksumInterface */
+    protected $cacheTagsChecksum;
     protected $prefix;
 
     public function __construct(
         RedisClientFactory $clientFactory,
         CacheSerializerInterface $serializer,
+        CacheTagsChecksumInterface $cacheTagsChecksum,
         $prefix = ''
     ) {
         try {
@@ -34,6 +38,7 @@ class RedisStorage implements StorageInterface
             watchdog_exception('wmcontroller.redis', $e);
         }
         $this->serializer = $serializer;
+        $this->cacheTagsChecksum = $cacheTagsChecksum;
         $this->prefix = $prefix;
     }
 
@@ -59,10 +64,28 @@ class RedisStorage implements StorageInterface
             $rows = $this->redis->mget(
                 $this->prefix($chunk, $includeBody ? 'body' : '')
             );
+            $checksums = $this->redis->mget(
+                $this->prefix($chunk, 'checksum')
+            );
 
-            foreach (array_filter($rows) as $row) {
+            foreach ($rows as $i => $row) {
+                if (!$row) {
+                    continue;
+                }
                 $item = $this->serializer->denormalize($row);
-                if ($item->getExpiry() > $time) {
+                $tags = $this->redis->sMembers(
+                    $this->prefix($item->getId(), 'tags')
+                );
+                if (
+                    $item->getExpiry() > $time
+                    && (
+                        !isset($checksums[$i])
+                        || $this->cacheTagsChecksum->isValid(
+                            $checksums[$i],
+                            $tags
+                        )
+                    )
+                ) {
                     yield $item;
                 }
             }
@@ -87,6 +110,11 @@ class RedisStorage implements StorageInterface
         $tx->set(
             $this->prefix($id, 'body'),
             $this->serializer->normalize($item, true),
+            ($item->getExpiry() - $time)
+        );
+        $tx->set(
+            $this->prefix($id, 'checksum'),
+            $this->cacheTagsChecksum->getCurrentChecksum($tags),
             ($item->getExpiry() - $time)
         );
         $tx->zAdd(
@@ -153,6 +181,7 @@ class RedisStorage implements StorageInterface
             $tx->del($this->prefix($id));
             $tx->del($this->prefix($id, 'body'));
             $tx->del($this->prefix($id, 'tags'));
+            $tx->del($this->prefix($id, 'checksum'));
             $tx->del($this->prefix($id, 'path'));
             $tx->zRem($this->prefix('expiries'), $id);
 
