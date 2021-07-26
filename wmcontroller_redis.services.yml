@@ -5,14 +5,24 @@ services:
     wmcontroller.redis.factory:
         class: Drupal\wmcontroller_redis\RedisClientFactory
 
+    wmcontroller.redis.factory.checksum:
+        class: Drupal\wmcontroller_redis\RedisChecksumClientFactory
+
     wmcontroller.redis.internal.serializer:
         class: Drupal\wmcontroller_redis\Serializer
         arguments:
             - '@wmcontroller.cache.serializer'
+
+    wmcontroller.redis.checksum:
+        class: Drupal\wmcontroller_redis\Cache\CacheTagsChecksum
+        arguments: ['@wmcontroller.redis.factory.checksum']
+        tags:
+            - { name: cache_tags_invalidator }
 
     wmcontroller.cache.storage.redis:
         class: Drupal\wmcontroller_redis\Storage\RedisStorage
         arguments:
             - '@wmcontroller.redis.factory'
             - '@wmcontroller.redis.internal.serializer'
+            - '@wmcontroller.redis.checksum'
             - '%wmcontroller.cache.redis.prefix%'
