@@ -10,14 +10,14 @@
         }
     ],
     "require": {
-        "php": ">=7.1.0",
-        "drupal/core": "^8.0 || ^9.0",
+        "php": "^8.0",
+        "drupal/core": "^9.1",
         "drupal/redis": "^1.3",
-        "wieni/wmcontroller": ">=0.8 <0.11"
+        "wieni/wmcontroller": "^1.0"
     },
     "require-dev": {
         "ergebnis/composer-normalize": "^2.0",
-        "wieni/wmcodestyle": "^1.0"
+        "wieni/wmcodestyle": "^1.7"
     },
     "repositories": [
         {
