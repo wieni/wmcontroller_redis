@@ -1,7 +1,6 @@
 name: wmcontroller_redis
 type: module
 description: A Redis cache storage for wieni/wmcontroller
-core: 8.x
 core_version_requirement: ^9.1 || ^10
 package: Wieni
 dependencies:
