@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": "^8.0",
-        "drupal/core": "^9.1",
+        "drupal/core": "^9.1 || ^10.0",
         "drupal/redis": "^1.3",
         "wieni/wmcontroller": "^1.0"
     },
