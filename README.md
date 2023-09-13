@@ -31,6 +31,9 @@ $settings['wmcontroller.redis.connection']['host'] = '127.0.0.1';
 $settings['wmcontroller.redis.connection']['base'] = '0';
 ```
 
+Run `drush wmcontroller_redis:mark-expired` nightly to search for stale entries
+and mark them for deletion.
+
 ## Changelog
 All notable changes to this project will be documented in the
 [CHANGELOG](CHANGELOG.md) file.
