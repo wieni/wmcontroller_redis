@@ -1,0 +1,5 @@
+services:
+    wmcontroller_redis.commands.cache:
+        class: Drupal\wmcontroller_redis\Commands\CacheCommands
+        arguments: ['@wmcontroller.cache.storage']
+        tags: [{ name: drush.command }]

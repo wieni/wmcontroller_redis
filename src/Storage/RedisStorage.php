@@ -10,7 +10,7 @@ use Drupal\wmcontroller\Service\Cache\Storage\StorageInterface;
 use Drupal\wmcontroller_redis\RedisClientFactory;
 use Redis;
 
-class RedisStorage implements StorageInterface
+class RedisStorage implements StorageInterface, MarksExpiredInterface
 {
     /** @var \Redis */
     protected $redis;
@@ -127,6 +127,7 @@ class RedisStorage implements StorageInterface
             $this->prefix($id, 'tags'),
             ...$tags
         );
+        $tx->sRem($this->prefix('stale'), $id);
         foreach ($tags as $tag) {
             $tx->sAdd(
                 $this->prefix($tag),
@@ -173,10 +174,14 @@ class RedisStorage implements StorageInterface
             return;
         }
 
-        foreach ($ids as $id) {
-            $tags = $this->redis->sMembers($this->prefix($id, 'tags'));
+        $tagSet = $this->getTags($ids) ?: [];
 
-            $tx = $this->redis->multi();
+        $pipeline = $this->redis->pipeline();
+
+        foreach ($ids as $i => $id) {
+            $tags = $tagSet[$i] ?: [];
+
+            $tx = $pipeline->multi();
 
             $tx->del($this->prefix($id));
             $tx->del($this->prefix($id, 'body'));
@@ -184,6 +189,7 @@ class RedisStorage implements StorageInterface
             $tx->del($this->prefix($id, 'checksum'));
             $tx->del($this->prefix($id, 'path'));
             $tx->zRem($this->prefix('expiries'), $id);
+            $tx->sRem($this->prefix('stale'), $id);
 
             foreach ($tags as $tag) {
                 $tx->sRem(
@@ -194,6 +200,8 @@ class RedisStorage implements StorageInterface
 
             $tx->exec();
         }
+
+        $pipeline->exec();
     }
 
     public function getExpired($amount)
@@ -201,16 +209,9 @@ class RedisStorage implements StorageInterface
         if (!$this->redis) {
             return [];
         }
-        $ids = $this->redis->zRangeByScore(
-            $this->prefix('expiries'),
-            1,
-            time(),
-            [
-                'limit' => [0, $amount],
-            ]
-        );
 
-        return $ids;
+        // Return items from the stale set. See ::markExpired()
+        return $this->redis->sPop($this->prefix('stale'), $amount) ?: [];
     }
 
     public function flush()
@@ -220,6 +221,70 @@ class RedisStorage implements StorageInterface
         }
 
         $this->redis->flushDB();
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * This is a very expensive operation that does a checksum calculation
+     * for every cache entry. Due to how the cacheTagsChecksum implementation
+     * of Drupal core works (with a static cache), this becomes slower and
+     * slower after each performed calculation. This is why we periodically
+     * reset the static cache of the cacheTagsChecksum service.
+     * (Risky, because the reset method appears to be only used by tests)
+     *
+     * However, that has a side effect; that static cache is also used to track
+     * which tags have been invalidated during the request, to prevent the
+     * invalidation of the same cache tag multiple times.
+     * It is therefore best to run this method in a separate (drush) process
+     * where you don't perform any invalidations.
+     *
+     * This module is used in high-traffic sites. This method has been tested
+     * against >300K cache entries. Without the periodic resets, performance
+     * is, unfortunately, disastrous.
+     */
+    public function markExpired()
+    {
+        if (!$this->redis) {
+            return 0;
+        }
+
+        $staleCount = 0;
+        foreach ($this->getAllIds() as $entryIds) {
+            $tagsSet = $this->getTags($entryIds) ?: [];
+            $checksumsSet = $this->getChecksums($entryIds) ?: [];
+
+            // Reset the static cache. Drastically improves performance.
+            $this->cacheTagsChecksum->reset();
+
+            // Instead of fetching the cachetag invalidation counts one
+            // by one, we can fetch them all at once. This improves performance
+            $allCacheTags = [];
+            foreach ($tagsSet as $tags) {
+                $allCacheTags += array_flip($tags ?: []);
+            }
+            $this->cacheTagsChecksum->getCurrentChecksum(array_keys($allCacheTags));
+            unset($allCacheTags);
+
+            // Loop over all entries and check if they are stale.
+            $staleIds = [];
+            foreach ($entryIds as $i => $entryId) {
+                $checksum = $checksumsSet[$i];
+                $cacheTags = (array) ($tagsSet[$i] ?: []);
+
+                if (
+                    $checksum === false
+                    || !$this->cacheTagsChecksum->isValid((int) $checksum, $cacheTags)
+                ) {
+                    $staleIds[] = $entryId;
+                }
+            }
+
+            $staleCount += count($staleIds);
+            $this->redis->sAdd($this->prefix('stale'), ...$staleIds);
+        }
+
+        return $staleCount;
     }
 
     private function prefix($string, $prefix = '')
@@ -232,5 +297,37 @@ class RedisStorage implements StorageInterface
             return $result;
         }
         return $this->prefix . ($prefix ? "$prefix:" : '') . $string;
+    }
+
+    /** @return iterable<string[]> An iterable that contains arrays of entry Ids */
+    private function getAllIds(): \Generator
+    {
+        if (!$this->redis) {
+            return [];
+        }
+
+        $this->redis->setOption(Redis::OPT_SCAN, Redis::SCAN_RETRY);
+
+        $iterator = null;
+        while ($results = $this->redis->zScan($this->prefix('expiries'), $iterator, null, 1000)) {
+            yield array_keys($results);
+        }
+    }
+
+    /** @return iterable<string[]|false>|false */
+    private function getTags(array $ids)
+    {
+        $tx = $this->redis->pipeline();
+        foreach ($ids as $id) {
+            $tx->sMembers($this->prefix($id, 'tags'));
+        }
+
+        return $tx->exec();
+    }
+
+    /** @return iterable<string[]|false>|false */
+    private function getChecksums(array $ids)
+    {
+        return $this->redis->mGet($this->prefix($ids, 'checksum'));
     }
 }
