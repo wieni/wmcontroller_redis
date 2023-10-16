@@ -122,18 +122,22 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
             $item->getExpiry(),
             $id
         );
-        $tx->del($this->prefix($id, 'tags'));
-        $tx->sAdd(
-            $this->prefix($id, 'tags'),
-            ...$tags
-        );
         $tx->sRem($this->prefix('stale'), $id);
-        foreach ($tags as $tag) {
+
+        $tx->del($this->prefix($id, 'tags'));
+        if (!empty($tags)) {
             $tx->sAdd(
-                $this->prefix($tag),
-                $id
+                $this->prefix($id, 'tags'),
+                ...$tags
             );
+            foreach ($tags as $tag) {
+                $tx->sAdd(
+                    $this->prefix($tag),
+                    $id
+                );
+            }
         }
+
         $path = parse_url($item->getUri(), PHP_URL_PATH);
         if ($path) {
             $tx->set(
