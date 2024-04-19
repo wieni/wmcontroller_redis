@@ -253,8 +253,10 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
             return 0;
         }
 
+        $now = time();
         $staleCount = 0;
-        foreach ($this->getAllIds() as $entryIds) {
+        foreach ($this->getAllExpiries() as $expiries) {
+            $entryIds = array_keys($expiries);
             $tagsSet = $this->getTags($entryIds) ?: [];
             $checksumsSet = $this->getChecksums($entryIds) ?: [];
 
@@ -273,19 +275,25 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
             // Loop over all entries and check if they are stale.
             $staleIds = [];
             foreach ($entryIds as $i => $entryId) {
+                $expiry = (int) $expiries[$entryId];
                 $checksum = $checksumsSet[$i];
                 $cacheTags = (array) ($tagsSet[$i] ?: []);
 
                 if (
-                    $checksum === false
-                    || !$this->cacheTagsChecksum->isValid((int) $checksum, $cacheTags)
+                    $expiry <= $now
+                    || (
+                        $checksum === false
+                        || !$this->cacheTagsChecksum->isValid((int) $checksum, $cacheTags)
+                    )
                 ) {
                     $staleIds[] = $entryId;
                 }
             }
 
             $staleCount += count($staleIds);
-            $this->redis->sAdd($this->prefix('stale'), ...$staleIds);
+            if (!empty($staleIds)) {
+                $this->redis->sAdd($this->prefix('stale'), ...$staleIds);
+            }
         }
 
         return $staleCount;
@@ -303,8 +311,8 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
         return $this->prefix . ($prefix ? "$prefix:" : '') . $string;
     }
 
-    /** @return iterable<string[]> An iterable that contains arrays of entry Ids */
-    private function getAllIds(): \Generator
+    /** @return \Generator<array<array<int, float>>> */
+    private function getAllExpiries(): \Generator
     {
         if (!$this->redis) {
             return [];
@@ -314,7 +322,7 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
 
         $iterator = null;
         while ($results = $this->redis->zScan($this->prefix('expiries'), $iterator, null, 1000)) {
-            yield array_keys($results);
+            yield $results;
         }
     }
 
