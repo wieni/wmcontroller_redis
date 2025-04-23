@@ -4,6 +4,7 @@ namespace Drupal\wmcontroller_redis\Cache;
 
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
+use Drupal\Core\Utility\Error;
 use Drupal\redis\Cache\RedisCacheTagsChecksum;
 use Drupal\wmcontroller\Service\Cache\InvalidatorInterface;
 use Drupal\wmcontroller_redis\RedisClientFactory;
@@ -71,7 +72,8 @@ class CacheTagsChecksum implements CacheTagsChecksumInterface, CacheTagsInvalida
                 $decorated = new RedisCacheTagsChecksum($this->redisClientFactory);
             }
         } catch (\Exception $e) {
-            watchdog_exception('wmcontroller.redis', $e);
+            $logger = \Drupal::logger('wmcontroller.redis');
+            Error::logException($logger, $e);
         }
 
         return $this->redisCacheTagsChecksum = $decorated;
