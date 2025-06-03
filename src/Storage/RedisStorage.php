@@ -3,6 +3,7 @@
 namespace Drupal\wmcontroller_redis\Storage;
 
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
+use Drupal\Core\Utility\Error;
 use Drupal\wmcontroller\Entity\Cache;
 use Drupal\wmcontroller\Exception\NoSuchCacheEntryException;
 use Drupal\wmcontroller\Service\Cache\CacheSerializerInterface;
@@ -35,7 +36,8 @@ class RedisStorage implements StorageInterface, MarksExpiredInterface
             }
         } catch (\Exception $e) {
             $this->redis = null;
-            watchdog_exception('wmcontroller.redis', $e);
+            $logger = \Drupal::logger('wmcontroller.redis');
+            Error::logException($logger, $e);
         }
         $this->serializer = $serializer;
         $this->cacheTagsChecksum = $cacheTagsChecksum;

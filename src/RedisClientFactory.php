@@ -3,6 +3,7 @@
 namespace Drupal\wmcontroller_redis;
 
 use Drupal\Core\Site\Settings;
+use Drupal\Core\Utility\Error;
 use Drupal\redis\Client\PhpRedis;
 use Drupal\redis\ClientFactory;
 
@@ -32,7 +33,8 @@ class RedisClientFactory extends ClientFactory
                 $settings['password']
             );
         } catch (\Exception $e) {
-            watchdog_exception('wmcontroller.redis', $e);
+            $logger = \Drupal::logger('wmcontroller.redis');
+            Error::logException($logger, $e);
             return null;
         }
     }
