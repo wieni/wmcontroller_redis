@@ -7,7 +7,14 @@ use Drupal\Core\Utility\Error;
 use Drupal\redis\Client\PhpRedis;
 use Drupal\redis\ClientFactory;
 
-class RedisClientFactory extends ClientFactory
+/**
+ * Connects to the Redis server in $settings['wmcontroller.redis.connection'].
+ *
+ * This does not extend \Drupal\redis\ClientFactory: drupal/redis 2.x made its
+ * getClient() an instance method that returns a wrapper, and this module needs
+ * the \Redis connection itself.
+ */
+class RedisClientFactory
 {
     protected static $client;
 
@@ -26,16 +33,41 @@ class RedisClientFactory extends ClientFactory
         ];
 
         try {
-            return static::$client = (new PhpRedis())->getClient(
-                $settings['host'],
-                $settings['port'],
-                $settings['base'],
-                $settings['password']
-            );
+            return static::$client = static::connect($settings);
         } catch (\Exception $e) {
             $logger = \Drupal::logger('wmcontroller.redis');
             Error::logException($logger, $e);
             return null;
         }
+    }
+
+    protected static function connect(array $settings): \Redis
+    {
+        // drupal/redis 1.x
+        if (method_exists(PhpRedis::class, 'getClient')) {
+            return (new PhpRedis())->getClient(
+                $settings['host'],
+                $settings['port'],
+                $settings['base'],
+                $settings['password']
+            );
+        }
+
+        // drupal/redis 2.x only hands out wrapped connections. This is what
+        // drupal/redis 1.x does for a single host.
+        $redis = new \Redis();
+        $redis->connect($settings['host'], $settings['port'], 0.5);
+
+        if (isset($settings['password'])) {
+            $redis->auth($settings['password']);
+        }
+
+        if (isset($settings['base'])) {
+            $redis->select($settings['base']);
+        }
+
+        $redis->setOption(\Redis::OPT_SERIALIZER, \Redis::SERIALIZER_NONE);
+
+        return $redis;
     }
 }
