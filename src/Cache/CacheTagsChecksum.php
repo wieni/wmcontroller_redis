@@ -6,6 +6,9 @@ use Drupal\Core\Cache\CacheTagsChecksumInterface;
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Utility\Error;
 use Drupal\redis\Cache\RedisCacheTagsChecksum;
+use Drupal\redis\Client\PhpRedis;
+use Drupal\redis\ClientFactory;
+use Drupal\redis\ClientInterface;
 use Drupal\wmcontroller\Service\Cache\InvalidatorInterface;
 use Drupal\wmcontroller_redis\RedisClientFactory;
 
@@ -69,7 +72,7 @@ class CacheTagsChecksum implements CacheTagsChecksumInterface, CacheTagsInvalida
         try {
             $client = $this->redisClientFactory::getClient();
             if ($client instanceof \Redis) {
-                $decorated = new RedisCacheTagsChecksum($this->redisClientFactory);
+                $decorated = new RedisCacheTagsChecksum($this->clientFactory($client));
             }
         } catch (\Exception $e) {
             $logger = \Drupal::logger('wmcontroller.redis');
@@ -77,5 +80,55 @@ class CacheTagsChecksum implements CacheTagsChecksumInterface, CacheTagsInvalida
         }
 
         return $this->redisCacheTagsChecksum = $decorated;
+    }
+
+    /**
+     * Hands our own connection to drupal/redis' RedisCacheTagsChecksum, which
+     * only accepts a \Drupal\redis\ClientFactory.
+     *
+     * Anonymous classes, because the two drupal/redis majors have incompatible
+     * ClientFactory::getClient() signatures. PHP only checks the one that runs.
+     */
+    private function clientFactory(\Redis $redis): ClientFactory
+    {
+        // drupal/redis 1.x: static methods, getClient() returns \Redis.
+        if (method_exists(PhpRedis::class, 'getClient')) {
+            $factory = new class extends ClientFactory {
+                public static $redis;
+
+                public static function getClient()
+                {
+                    return static::$redis;
+                }
+
+                public static function getClientName()
+                {
+                    return 'PhpRedis';
+                }
+            };
+            $factory::$redis = $redis;
+
+            return $factory;
+        }
+
+        // drupal/redis 2.x: instance methods, getClient() returns a wrapper.
+        return new class($redis) extends ClientFactory {
+            private $redis;
+
+            public function __construct(\Redis $redis)
+            {
+                $this->redis = $redis;
+            }
+
+            public function getClient(): ClientInterface
+            {
+                return new PhpRedis($this->redis);
+            }
+
+            public function getClientName(): ?string
+            {
+                return 'PhpRedis';
+            }
+        };
     }
 }
